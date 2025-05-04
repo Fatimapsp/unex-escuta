@@ -2,6 +2,7 @@ const express = require("express");
 const bcrypt = require("bcrypt");
 const Joi = require("joi");
 const User = require("../models/user");
+const { generateToken } = require("../utils/jwt"); // Importando função para gerar token
 
 const router = express.Router();
 
@@ -35,7 +36,10 @@ router.post("/", async (req, res) => {
     const newUser = new User({ name, email, password: hashedPassword, registration, role, courses });
     await newUser.save();
 
-    res.status(201).json({ message: "Usuário criado com sucesso!" });
+    // Gerar token JWT
+    const token = generateToken(newUser);
+
+    res.status(201).json({ message: "Usuário criado com sucesso!", token });
   } catch (error) {
     res.status(500).json({ message: "Erro interno do servidor", error });
   }
