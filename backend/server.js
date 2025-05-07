@@ -1,7 +1,6 @@
 const express = require("express");
 const cors = require("cors");
 const dotenv = require("dotenv");
-const mongoose = require("mongoose");
 const jwt = require("jsonwebtoken");
 
 const app = express();
@@ -12,7 +11,10 @@ app.use(express.json());
 
 require("dotenv").config();
 
-mongoose.connect("mongodb://localhost:27017/unex_escuta");
+const connectDB = require("../backend/config/db");
+
+
+connectDB();
 
 app.get("/status", (req, res) => {
   res.json({ status: "API está rodando" });
