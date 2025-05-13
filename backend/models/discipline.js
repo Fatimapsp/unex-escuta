@@ -36,5 +36,9 @@ new disciplineSchema = new Schema({
     }
 });
 
+disciplineSchema.index({ name: 1 });
+disciplineSchema.index({ department: 1 });
+disciplineSchema.index({ professors: 1 });
+
 module.exports = mongoose.model("Discipline", disciplineSchema);
 

@@ -84,4 +84,9 @@ const feedbackSchema = new Schema({
   },
 });
 
+feedbackSchema.index({ targetType: 1 });
+feedbackSchema.index({ targetId: 1 });
+feedbackSchema.index({ 'metadata.academicYear': 1, 'metadata.semester': 1 });
+
+
 module.exports = mongoose.model("Feedback", feedbackSchema);

@@ -20,4 +20,7 @@ const infrastructureSchema = new Schema({
   },
 });
 
+infrastructureSchema.index({ location: 1 });
+infrastructureSchema.index({ type: 1 });
+
 module.exports = mongoose.model("Infraestructure", infrastructureSchema);

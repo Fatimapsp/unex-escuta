@@ -27,4 +27,7 @@ const professorSchema = new Schema({
   },
 });
 
+professorSchema.index({ name: 1 });
+professorSchema.index({ disciplines: 1 });
+
 module.exports = mongoose.model("Professor", professorSchema);
