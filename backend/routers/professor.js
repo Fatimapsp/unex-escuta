@@ -2,11 +2,12 @@ const express = require("express");
 const router = express.Router();
 const Professor = require("../models/professor");
 const { check, validationResult } = require("express-validator");
+const { authenticate, authorize } = require("../middleware/auth");
 
 //Buscar todos os professores
-router.get("/", async (req, res) => {
+router.get("/", authenticate, async (req, res) => {
   try {
-    const professors = await Professor.find().populate();
+    const professors = await Professor.find().populate("disciplines");
     res.status(200).json(professors);
   } catch (err) {
     res.status(500).json({ error: err.message });
@@ -14,7 +15,7 @@ router.get("/", async (req, res) => {
 });
 
 //Buscar professor por id
-router.get("/:id", async (req, res) => {
+router.get("/:id", authenticate, async (req, res) => {
   try {
     const professor = await Professor.findById(req.params.id);
     if (!professor)
@@ -26,7 +27,7 @@ router.get("/:id", async (req, res) => {
 });
 
 //Buscar professor por nome
-router.get("/name/:name", async (req, res) => {
+router.get("/name/:name", authenticate, async (req, res) => {
   try {
     const professor = await Professor.findOne({
       name: { $regex: req.params.name, $options: "i" },
@@ -42,6 +43,8 @@ router.get("/name/:name", async (req, res) => {
 //Criar Professor
 router.post(
   "/",
+  authenticate,
+  authorize("admin"),
   [
     check("name", "Nome é obrigatório").notEmpty(),
     check("courses", "Cursos deve ser um array").isArray(),
@@ -54,30 +57,34 @@ router.post(
     try {
       const newProfessor = new Professor(req.body);
       const saved = await newProfessor.save();
-      res.status(200).json(saved);
+      res.status(201).json(saved);
     } catch (error) {
       res.status(400).json({ error: error.message });
     }
   }
 );
 
-//Atualizar professor
-router.put("/:id", async (req, res) => {
+//Atualizar professor - FIXED: middleware order corrected
+router.put("/:id", authenticate, authorize("admin"), async (req, res) => {
   try {
     const update = await Professor.findByIdAndUpdate(req.params.id, req.body, {
       new: true,
+      runValidators: true,
     });
     res.status(200).json(update);
-  } catch (err) {
+  } catch (error) {
     res.status(400).json({ error: error.message });
   }
 });
 
-router.delete("/:id", async (req, res) => {
+//Deletar professor - FIXED: middleware order corrected
+router.delete("/:id", authenticate, authorize("admin"), async (req, res) => {
   try {
     await Professor.findByIdAndDelete(req.params.id);
     res.status(200).json({ message: "Professor deletado com sucesso" });
-  } catch (err) {
+  } catch (error) {
     res.status(400).json({ error: error.message });
   }
 });
+
+module.exports = router;
