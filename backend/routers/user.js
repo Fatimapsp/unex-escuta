@@ -13,16 +13,14 @@ router.get("/", authenticate, authorize("admin"), async (req, res) => {
   try {
     const { page = 1, limit = 10, role, isActive } = req.query;
 
-    // Filtros
     const filters = {};
     if (role) filters.role = role;
     if (isActive !== undefined) filters.isActive = isActive === "true";
 
-    // Paginação
     const options = {
       page: parseInt(page),
       limit: parseInt(limit),
-      select: "-password", // Nunca retornar senhas
+      select: "-password",
       sort: { createdAt: -1 },
     };
 
@@ -75,98 +73,54 @@ router.get("/me/profile", authenticate, (req, res) => {
 });
 
 // ATUALIZAR USUÁRIO - Próprio usuário ou ADMIN
-router.put(
-  "/:id",
-  authenticate,
-  authorizeOwnerOrAdmin,
-  [
-    check("name")
-      .optional()
-      .trim()
-      .isLength({ min: 3, max: 50 })
-      .withMessage("Nome deve ter entre 3 e 50 caracteres"),
+router.put("/:id", authenticate, authorizeOwnerOrAdmin, async (req, res) => {
+  try {
+    const userId = req.params.id;
+    const updateData = { ...req.body };
 
-    check("email")
-      .optional()
-      .isEmail()
-      .normalizeEmail()
-      .withMessage("Email deve ser válido"),
+    delete updateData.password;
+    delete updateData.registration;
+    delete updateData.createdAt;
 
-    check("courses")
-      .optional()
-      .isArray()
-      .withMessage("Cursos deve ser um array"),
+    if (req.user.role !== "admin") {
+      delete updateData.role;
+      delete updateData.isActive;
+    }
 
-    check("role")
-      .optional()
-      .isIn(["estudante", "professor", "admin"])
-      .withMessage("Role deve ser: estudante, professor ou admin"),
-  ],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
+    const user = await User.findByIdAndUpdate(
+      userId,
+      { ...updateData, updatedAt: new Date() },
+      { new: true, runValidators: true }
+    ).select("-password");
+
+    if (!user) {
+      return res.status(404).json({ error: "Usuário não encontrado" });
+    }
+
+    res.json({
+      message: "Usuário atualizado com sucesso",
+      user,
+    });
+  } catch (error) {
+    console.error("Erro ao atualizar usuário:", error);
+
+    if (error.code === 11000) {
+      return res.status(400).json({ error: "Email já está em uso" });
+    }
+
+    if (error.name === "ValidationError") {
+      const validationErrors = Object.values(error.errors).map(
+        (err) => err.message
+      );
       return res.status(400).json({
         error: "Dados inválidos",
-        details: errors.array(),
+        details: validationErrors,
       });
     }
 
-    try {
-      const userId = req.params.id;
-      const updateData = { ...req.body };
-
-      // Remover campos que não devem ser atualizados
-      delete updateData.password;
-      delete updateData.registration;
-      delete updateData.createdAt;
-
-      // Apenas admin pode alterar role e isActive
-      if (req.user.role !== "admin") {
-        delete updateData.role;
-        delete updateData.isActive;
-      }
-
-      const user = await User.findByIdAndUpdate(
-        userId,
-        {
-          ...updateData,
-          updatedAt: new Date(),
-        },
-        {
-          new: true,
-          runValidators: true,
-        }
-      ).select("-password");
-
-      if (!user) {
-        return res.status(404).json({ error: "Usuário não encontrado" });
-      }
-
-      res.json({
-        message: "Usuário atualizado com sucesso",
-        user,
-      });
-    } catch (error) {
-      console.error("Erro ao atualizar usuário:", error);
-
-      if (error.code === 11000) {
-        return res.status(400).json({ error: "Email já está em uso" });
-      }
-
-      if (error.name === "ValidationError") {
-        const validationErrors = Object.values(error.errors).map(
-          (err) => err.message
-        );
-        return res.status(400).json({
-          error: "Dados inválidos",
-          details: validationErrors,
-        });
-      }
-
-      res.status(500).json({ error: "Erro interno do servidor" });
-    }
+    res.status(500).json({ error: "Erro interno do servidor" });
   }
-);
+});
 
 // ALTERAR SENHA - Próprio usuário apenas
 router.put(
@@ -201,14 +155,12 @@ router.put(
     try {
       const { currentPassword, newPassword } = req.body;
 
-      // Buscar usuário com senha
       const user = await User.findById(req.params.id).select("+password");
 
       if (!user) {
         return res.status(404).json({ error: "Usuário não encontrado" });
       }
 
-      // Verificar senha atual
       const isCurrentPasswordValid = await user.comparePassword(
         currentPassword
       );
@@ -217,7 +169,6 @@ router.put(
         return res.status(400).json({ error: "Senha atual incorreta" });
       }
 
-      // Atualizar senha (será hasheada automaticamente)
       user.password = newPassword;
       user.updatedAt = new Date();
       await user.save();

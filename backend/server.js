@@ -64,7 +64,7 @@ app.use((err, req, res, next) => {
   res.status(500).json({ error: "Algo deu errado!" });
 });
 
-// Rota 404 - FIXED: Changed from "*" to catch-all without path-to-regexp issues
+// Rota 404
 app.use((req, res) => {
   res.status(404).json({ error: "Rota não encontrada" });
 });

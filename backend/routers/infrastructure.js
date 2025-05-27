@@ -4,6 +4,7 @@ const { check, validationResult } = require("express-validator");
 const Infrastructure = require("../models/infrastructure");
 const { authenticate, authorize } = require("../middleware/auth");
 
+//Buscar todas
 router.get("/", authenticate, async (req, res) => {
   try {
     const infraestruturas = await Infrastructure.find({ isActive: true });
@@ -14,6 +15,7 @@ router.get("/", authenticate, async (req, res) => {
   }
 });
 
+//Buscar por id
 router.get("/:id", authenticate, async (req, res) => {
   const { id } = req.params;
   try {
@@ -27,6 +29,7 @@ router.get("/:id", authenticate, async (req, res) => {
   }
 });
 
+//Buscar por nome
 router.get("/name/:name", authenticate, async (req, res) => {
   try {
     const infraestrutura = await Infrastructure.findOne({
@@ -45,6 +48,7 @@ router.get("/name/:name", authenticate, async (req, res) => {
   }
 });
 
+//criar
 router.post(
   "/",
   authenticate,
@@ -58,18 +62,7 @@ router.post(
       .isLength({ min: 3 })
       .withMessage("O nome deve ter no mínimo 3 caracteres"),
 
-    check("type")
-      .notEmpty()
-      .withMessage("O tipo é obrigatório")
-      .isIn([
-        "laboratory",
-        "classroom",
-        "library",
-        "auditorium",
-        "cafeteria",
-        "sports_facility",
-      ])
-      .withMessage("Tipo inválido"),
+    check("type").notEmpty().withMessage("O tipo é obrigatório"),
 
     check("location")
       .notEmpty()
@@ -96,6 +89,7 @@ router.post(
   }
 );
 
+//atualizar
 router.put("/:id", authenticate, authorize("admin"), async (req, res) => {
   try {
     const updated = await Infrastructure.findByIdAndUpdate(
@@ -123,6 +117,7 @@ router.put("/:id", authenticate, authorize("admin"), async (req, res) => {
   }
 });
 
+//deletar
 router.delete("/:id", authenticate, authorize("admin"), async (req, res) => {
   try {
     const deleted = await Infrastructure.findByIdAndDelete(req.params.id);

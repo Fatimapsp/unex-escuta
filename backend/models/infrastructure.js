@@ -12,14 +12,6 @@ const infrastructureSchema = new Schema({
   type: {
     type: String,
     required: true,
-    enum: [
-      "laboratory",
-      "classroom",
-      "library",
-      "auditorium",
-      "cafeteria",
-      "sports_facility",
-    ],
   },
   location: {
     type: String,

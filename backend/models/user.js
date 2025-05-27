@@ -7,8 +7,6 @@ const userSchema = new Schema({
     type: String,
     required: true,
     trim: true,
-    minlength: 3,
-    maxlength: 50,
   },
   email: {
     type: String,
@@ -22,7 +20,7 @@ const userSchema = new Schema({
     type: String,
     required: true,
     minlength: 6,
-    select: false, // Por padrão não incluir nas consultas
+    select: false,
   },
   registration: {
     type: String,
@@ -38,9 +36,6 @@ const userSchema = new Schema({
   courses: {
     type: [String],
     default: [],
-    required: function () {
-      return this.role === "estudante";
-    },
   },
   isActive: {
     type: Boolean,
@@ -85,7 +80,6 @@ userSchema.methods.generateAuthToken = function () {
     role: this.role,
     courses: this.courses,
     isActive: this.isActive,
-    profilePicture: this.profilePicture,
     createdAt: this.createdAt,
   };
 };
@@ -94,10 +88,8 @@ userSchema.pre("findOneAndUpdate", function () {
   this.set({ updatedAt: new Date() });
 });
 
+// Índices
 userSchema.index({ email: 1 });
 userSchema.index({ registration: 1 });
-userSchema.index({ role: 1 });
-userSchema.index({ courses: 1 });
-userSchema.index({ isActive: 1 });
 
 module.exports = mongoose.model("User", userSchema);

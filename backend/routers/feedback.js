@@ -2,22 +2,23 @@ const express = require("express");
 const router = express.Router();
 const { check, validationResult } = require("express-validator");
 const Feedback = require("../models/feedback");
-const {
-  authenticate,
-  authorize,
-  canCreateFeedback,
-} = require("../middleware/auth");
+const { authenticate, authorize } = require("../middleware/auth");
 
-// Retorna feedbacks filtrados
-router.get("/filter", authenticate, async (req, res) => {
+// Listar feedbacks com filtros
+router.get("/", authenticate, async (req, res) => {
   try {
-    const { type, target, startDate, endDate, status } = req.query;
+    const {
+      type,
+      target,
+      startDate,
+      endDate,
+      page = 1,
+      limit = 10,
+    } = req.query;
 
     const filtros = {};
-
     if (type) filtros.targetType = type;
     if (target) filtros.targetId = target;
-    if (status) filtros.status = status;
 
     if (startDate || endDate) {
       filtros.createdAt = {};
@@ -25,40 +26,153 @@ router.get("/filter", authenticate, async (req, res) => {
       if (endDate) filtros.createdAt.$lte = new Date(endDate);
     }
 
-    //Paginação
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
+    const skip = (parseInt(page) - 1) * parseInt(limit);
 
-    const resultados = await Feedback.find(filtros)
+    let feedbacks = await Feedback.find(filtros)
       .populate("targetId")
       .populate("author.userID", "name email")
       .sort({ createdAt: -1 })
       .skip(skip)
-      .limit(limit);
+      .limit(parseInt(limit));
+
+    feedbacks = feedbacks.map((feedback) => {
+      const fb = feedback.toObject();
+      if (fb.author.isAnonymous) {
+        delete fb.author.userID;
+      }
+      return fb;
+    });
 
     const total = await Feedback.countDocuments(filtros);
 
-    res.status(200).json({
-      feedbacks: resultados,
+    res.json({
+      feedbacks,
       pagination: {
-        current: page,
-        pages: Math.ceil(total / limit),
+        current: parseInt(page),
+        pages: Math.ceil(total / parseInt(limit)),
         total,
       },
     });
   } catch (error) {
     console.error("Erro ao buscar feedbacks:", error);
-    res.status(500).json({ error: "Erro ao buscar feedbacks com filtros" });
+    res.status(500).json({ error: "Erro ao buscar feedbacks" });
   }
 });
 
-// Estatísticas
-router.get("/stats", authenticate, async (req, res) => {
+// Buscar feedback por ID
+router.get("/:id", authenticate, async (req, res) => {
+  try {
+    let feedback = await Feedback.findById(req.params.id)
+      .populate("targetId")
+      .populate("author.userID", "name email");
+
+    if (!feedback) {
+      return res.status(404).json({ error: "Feedback não encontrado" });
+    }
+
+    feedback = feedback.toObject();
+
+    if (feedback.author.isAnonymous) {
+      delete feedback.author.userID;
+    }
+
+    res.json(feedback);
+  } catch (error) {
+    console.error("Erro ao buscar feedback:", error);
+    res.status(500).json({ error: "Erro ao buscar feedback" });
+  }
+});
+
+// Criar feedback
+router.post(
+  "/",
+  authenticate,
+  [
+    check("targetType")
+      .isIn(["professor", "disciplina", "infraestrutura"])
+      .withMessage(
+        "TargetType deve ser: professor, disciplina ou infraestrutura"
+      ),
+    check("targetId")
+      .isMongoId()
+      .withMessage("TargetId deve ser um ObjectId válido"),
+    check("comment")
+      .notEmpty()
+      .withMessage("Comentário é obrigatório")
+      .isLength({ max: 500 })
+      .withMessage("Comentário deve ter no máximo 500 caracteres"),
+    check("metadata.semester")
+      .matches(/^\d{4}\.[12]$/)
+      .withMessage("Semestre deve estar no formato YYYY.N (ex: 2025.1)"),
+    check("metadata.academicYear")
+      .isInt({ min: 2015, max: new Date().getFullYear() + 1 })
+      .withMessage("Ano acadêmico inválido"),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        error: "Dados inválidos",
+        details: errors.array(),
+      });
+    }
+
+    try {
+      const feedback = new Feedback({
+        ...req.body,
+        author: {
+          userID: req.user._id,
+          isAnonymous: req.body.isAnonymous || false,
+        },
+      });
+
+      await feedback.save();
+      await feedback.populate("targetId");
+
+      res.status(201).json({
+        message: "Feedback criado com sucesso",
+        feedback,
+      });
+    } catch (error) {
+      console.error("Erro ao criar feedback:", error);
+      res.status(500).json({ error: "Erro ao criar feedback" });
+    }
+  }
+);
+
+// Deletar feedback (autor ou admin)
+router.delete("/:id", authenticate, async (req, res) => {
+  try {
+    const feedback = await Feedback.findById(req.params.id);
+    if (!feedback) {
+      return res.status(404).json({ error: "Feedback não encontrado" });
+    }
+
+    // Verifica se é o autor ou admin
+    const isAuthor =
+      feedback.author.userID.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === "admin";
+
+    if (!isAuthor && !isAdmin) {
+      return res.status(403).json({
+        error: "Sem permissão para deletar este feedback",
+      });
+    }
+
+    await Feedback.findByIdAndDelete(req.params.id);
+    res.json({ message: "Feedback excluído com sucesso" });
+  } catch (error) {
+    console.error("Erro ao excluir feedback:", error);
+    res.status(500).json({ error: "Erro ao excluir feedback" });
+  }
+});
+
+// Estatísticas gerais
+router.get("/stats/general", authenticate, async (req, res) => {
   try {
     const { targetType } = req.query;
 
-    const matchStage = { status: "approved" };
+    const matchStage = {};
     if (targetType) matchStage.targetType = targetType;
 
     const stats = await Feedback.aggregate([
@@ -98,223 +212,110 @@ router.get("/stats", authenticate, async (req, res) => {
       },
     ]);
 
-    res.json(stats);
+    res.json({ stats });
   } catch (error) {
     console.error("Erro ao gerar estatísticas:", error);
-    res.status(500).json({ error: "Erro ao gerar estatísticas." });
+    res.status(500).json({ error: "Erro ao gerar estatísticas" });
   }
 });
 
-// Retorna todos os feedbacks
-router.get("/", authenticate, async (req, res) => {
+// Estatísticas por semestre
+router.get("/stats/semester", authenticate, async (req, res) => {
   try {
-    const page = parseInt(req.query.page) || 1;
-    const limit = parseInt(req.query.limit) || 10;
-    const skip = (page - 1) * limit;
+    const { year, targetType } = req.query;
 
-    const feedbacks = await Feedback.find()
-      .populate("targetId")
-      .populate("author.userID", "name email")
-      .sort({ createdAt: -1 })
-      .skip(skip)
-      .limit(limit);
+    const matchStage = {};
+    if (targetType) matchStage.targetType = targetType;
+    if (year) matchStage["metadata.academicYear"] = parseInt(year);
 
-    const total = await Feedback.countDocuments();
-
-    res.status(200).json({
-      feedbacks,
-      pagination: {
-        current: page,
-        pages: Math.ceil(total / limit),
-        total,
+    const stats = await Feedback.aggregate([
+      { $match: matchStage },
+      {
+        $group: {
+          _id: {
+            semester: "$metadata.semester",
+            targetType: "$targetType",
+          },
+          avgTeachingQuality: { $avg: "$ratings.teachingQuality" },
+          avgClarity: { $avg: "$ratings.clarity" },
+          avgInfrastructure: { $avg: "$ratings.infrastructureCondition" },
+          totalFeedbacks: { $sum: 1 },
+        },
       },
+      { $sort: { "_id.semester": -1, "_id.targetType": 1 } },
+    ]);
+
+    res.json({ stats });
+  } catch (error) {
+    console.error("Erro ao gerar estatísticas por semestre:", error);
+    res.status(500).json({ error: "Erro ao gerar estatísticas" });
+  }
+});
+
+// Ranking (top professores/disciplinas)
+router.get("/stats/ranking", authenticate, async (req, res) => {
+  try {
+    const {
+      targetType = "professor",
+      limit = 10,
+      minFeedbacks = 3,
+    } = req.query;
+
+    const pipeline = [
+      {
+        $match: {
+          targetType,
+          $or: [
+            { "ratings.teachingQuality": { $exists: true } },
+            { "ratings.clarity": { $exists: true } },
+          ],
+        },
+      },
+      {
+        $group: {
+          _id: "$targetId",
+          avgTeachingQuality: { $avg: "$ratings.teachingQuality" },
+          avgClarity: { $avg: "$ratings.clarity" },
+          totalFeedbacks: { $sum: 1 },
+        },
+      },
+      {
+        $match: {
+          totalFeedbacks: { $gte: parseInt(minFeedbacks) },
+        },
+      },
+      {
+        $addFields: {
+          overallRating: {
+            $avg: [
+              { $ifNull: ["$avgTeachingQuality", 0] },
+              { $ifNull: ["$avgClarity", 0] },
+            ],
+          },
+        },
+      },
+      { $sort: { overallRating: -1 } },
+      { $limit: parseInt(limit) },
+      {
+        $lookup: {
+          from: targetType === "professor" ? "professors" : "disciplines",
+          localField: "_id",
+          foreignField: "_id",
+          as: "targetInfo",
+        },
+      },
+    ];
+
+    const ranking = await Feedback.aggregate(pipeline);
+
+    res.json({
+      message: `Top ${targetType}s ranking`,
+      data: ranking,
     });
   } catch (error) {
-    console.error("Erro ao buscar feedbacks:", error);
-    res.status(500).json({ error: "Erro ao buscar feedbacks" });
+    console.error("Erro ao gerar ranking:", error);
+    res.status(500).json({ error: "Erro ao gerar ranking" });
   }
 });
-
-// Retorna um feedback específico pelo ID
-router.get("/:id", authenticate, async (req, res) => {
-  try {
-    const feedback = await Feedback.findById(req.params.id)
-      .populate("targetId")
-      .populate("author.userID", "name email");
-
-    if (!feedback) {
-      return res.status(404).json({ error: "Feedback não encontrado" });
-    }
-    res.status(200).json(feedback);
-  } catch (error) {
-    console.error("Erro ao buscar feedback:", error);
-    res.status(500).json({ error: "Erro ao buscar feedback pelo ID" });
-  }
-});
-
-// Validações
-router.post(
-  "/",
-  authenticate,
-  canCreateFeedback,
-  [
-    check("targetType")
-      .notEmpty()
-      .withMessage("TargetType é obrigatório")
-      .isIn(["professor", "disciplina", "infraestrutura"])
-      .withMessage(
-        "TargetType deve ser: professor, disciplina ou infraestrutura"
-      ),
-
-    check("targetId")
-      .notEmpty()
-      .withMessage("TargetId é obrigatório")
-      .isMongoId()
-      .withMessage("TargetId deve ser um ObjectId válido"),
-
-    check("ratings.teachingQuality")
-      .if((value, { req }) =>
-        ["professor", "disciplina"].includes(req.body.targetType)
-      )
-      .isInt({ min: 1, max: 5 })
-      .withMessage("Teaching Quality deve ser um valor entre 1 e 5"),
-
-    check("ratings.clarity")
-      .if((value, { req }) =>
-        ["professor", "disciplina"].includes(req.body.targetType)
-      )
-      .isInt({ min: 1, max: 5 })
-      .withMessage("Clarity deve ser um valor entre 1 e 5"),
-
-    check("ratings.infrastructureCondition")
-      .if((value, { req }) => req.body.targetType === "infraestrutura")
-      .isInt({ min: 1, max: 5 })
-      .withMessage("Infraestrutura deve ser um valor entre 1 e 5"),
-
-    check("comment")
-      .notEmpty()
-      .withMessage("Comentário é obrigatório")
-      .isLength({ max: 500 })
-      .withMessage("Comentário deve ter no máximo 500 caracteres"),
-
-    check("metadata.semester")
-      .notEmpty()
-      .withMessage("Semestre é obrigatório")
-      .matches(/^\d{4}\.[12]$/)
-      .withMessage("Semestre deve estar no formato YYYY.N (ex: 2025.1)"),
-
-    check("metadata.academicYear")
-      .isInt({ min: 2015, max: new Date().getFullYear() + 1 })
-      .withMessage("Ano acadêmico inválido"),
-  ],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        error: "Dados inválidos",
-        details: errors.array(),
-      });
-    }
-
-    try {
-      // Map targetType to targetModel before creating the feedback
-      const modelMap = {
-        professor: "Professor",
-        disciplina: "Discipline",
-        infraestrutura: "Infrastructure",
-      };
-
-      const feedback = new Feedback({
-        ...req.body,
-        targetModel: modelMap[req.body.targetType], // Set targetModel explicitly
-        author: {
-          userID: req.user._id,
-          isAnonymous: req.body.isAnonymous || false,
-        },
-      });
-
-      await feedback.save();
-
-      // Populate os dados antes de retornar
-      await feedback.populate("targetId");
-
-      res.status(201).json({
-        message: "Feedback criado com sucesso",
-        feedback,
-      });
-    } catch (error) {
-      console.error("Erro ao criar feedback:", error);
-      res.status(500).json({ error: "Erro ao criar feedback" });
-    }
-  }
-);
-
-// Apenas admin ou autor pode deletar
-router.delete("/:id", authenticate, async (req, res) => {
-  try {
-    const feedback = await Feedback.findById(req.params.id);
-    if (!feedback) {
-      return res.status(404).json({ error: "Feedback não encontrado" });
-    }
-
-    // Verifica se é o autor ou admin
-    const isAuthor =
-      feedback.author.userID.toString() === req.user._id.toString();
-    const isAdmin = req.user.role === "admin";
-
-    if (!isAuthor && !isAdmin) {
-      return res
-        .status(403)
-        .json({ error: "Sem permissão para deletar este feedback" });
-    }
-
-    await Feedback.findByIdAndDelete(req.params.id);
-    res.status(200).json({ message: "Feedback excluído com sucesso" });
-  } catch (error) {
-    console.error("Erro ao excluir feedback:", error);
-    res.status(500).json({ error: "Erro ao excluir feedback" });
-  }
-});
-
-// Rota para aprovar/rejeitar feedback (apenas admin)
-router.patch(
-  "/:id/status",
-  authenticate,
-  authorize("admin"),
-  [
-    check("status")
-      .isIn(["pending", "approved", "rejected"])
-      .withMessage("Status deve ser: pending, approved ou rejected"),
-  ],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({ errors: errors.array() });
-    }
-
-    try {
-      const feedback = await Feedback.findByIdAndUpdate(
-        req.params.id,
-        {
-          status: req.body.status,
-          updatedAt: new Date(),
-        },
-        { new: true }
-      );
-
-      if (!feedback) {
-        return res.status(404).json({ error: "Feedback não encontrado" });
-      }
-
-      res.json({
-        message: "Status do feedback atualizado",
-        feedback,
-      });
-    } catch (error) {
-      console.error("Erro ao atualizar status:", error);
-      res.status(500).json({ error: "Erro ao atualizar status do feedback" });
-    }
-  }
-);
 
 module.exports = router;
