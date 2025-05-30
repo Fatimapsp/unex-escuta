@@ -1,6 +1,7 @@
 const express = require("express");
 const router = express.Router();
 const { check, validationResult } = require("express-validator");
+const mongoose = require("mongoose");
 const Feedback = require("../models/feedback");
 const { authenticate, authorize } = require("../middleware/auth");
 
@@ -56,114 +57,6 @@ router.get("/", authenticate, async (req, res) => {
   } catch (error) {
     console.error("Erro ao buscar feedbacks:", error);
     res.status(500).json({ error: "Erro ao buscar feedbacks" });
-  }
-});
-
-// Buscar feedback por ID
-router.get("/:id", authenticate, async (req, res) => {
-  try {
-    let feedback = await Feedback.findById(req.params.id)
-      .populate("targetId")
-      .populate("author.userID", "name email");
-
-    if (!feedback) {
-      return res.status(404).json({ error: "Feedback não encontrado" });
-    }
-
-    feedback = feedback.toObject();
-
-    if (feedback.author.isAnonymous) {
-      delete feedback.author.userID;
-    }
-
-    res.json(feedback);
-  } catch (error) {
-    console.error("Erro ao buscar feedback:", error);
-    res.status(500).json({ error: "Erro ao buscar feedback" });
-  }
-});
-
-// Criar feedback
-router.post(
-  "/",
-  authenticate,
-  [
-    check("targetType")
-      .isIn(["professor", "disciplina", "infraestrutura"])
-      .withMessage(
-        "TargetType deve ser: professor, disciplina ou infraestrutura"
-      ),
-    check("targetId")
-      .isMongoId()
-      .withMessage("TargetId deve ser um ObjectId válido"),
-    check("comment")
-      .notEmpty()
-      .withMessage("Comentário é obrigatório")
-      .isLength({ max: 500 })
-      .withMessage("Comentário deve ter no máximo 500 caracteres"),
-    check("metadata.semester")
-      .matches(/^\d{4}\.[12]$/)
-      .withMessage("Semestre deve estar no formato YYYY.N (ex: 2025.1)"),
-    check("metadata.academicYear")
-      .isInt({ min: 2015, max: new Date().getFullYear() + 1 })
-      .withMessage("Ano acadêmico inválido"),
-  ],
-  async (req, res) => {
-    const errors = validationResult(req);
-    if (!errors.isEmpty()) {
-      return res.status(400).json({
-        error: "Dados inválidos",
-        details: errors.array(),
-      });
-    }
-
-    try {
-      const feedback = new Feedback({
-        ...req.body,
-        author: {
-          userID: req.user._id,
-          isAnonymous: req.body.isAnonymous || false,
-        },
-      });
-
-      await feedback.save();
-      await feedback.populate("targetId");
-
-      res.status(201).json({
-        message: "Feedback criado com sucesso",
-        feedback,
-      });
-    } catch (error) {
-      console.error("Erro ao criar feedback:", error);
-      res.status(500).json({ error: "Erro ao criar feedback" });
-    }
-  }
-);
-
-// Deletar feedback (autor ou admin)
-router.delete("/:id", authenticate, async (req, res) => {
-  try {
-    const feedback = await Feedback.findById(req.params.id);
-    if (!feedback) {
-      return res.status(404).json({ error: "Feedback não encontrado" });
-    }
-
-    // Verifica se é o autor ou admin
-    const isAuthor =
-      feedback.author.userID.toString() === req.user._id.toString();
-    const isAdmin = req.user.role === "admin";
-
-    if (!isAuthor && !isAdmin) {
-      return res.status(403).json({
-        error: "Sem permissão para deletar este feedback",
-      });
-    }
-
-    await Feedback.findByIdAndDelete(req.params.id);
-    res.json({ message: "Feedback excluído com sucesso" });
-  } catch (error) {
-    console.error("Erro ao excluir feedback:", error);
-    res.status(500).json({ error: "Erro ao excluir feedback" });
   }
 });
 
@@ -252,7 +145,7 @@ router.get("/stats/semester", authenticate, async (req, res) => {
   }
 });
 
-// Ranking (top professores/disciplinas)
+// Ranking
 router.get("/stats/ranking", authenticate, async (req, res) => {
   try {
     const {
@@ -315,6 +208,124 @@ router.get("/stats/ranking", authenticate, async (req, res) => {
   } catch (error) {
     console.error("Erro ao gerar ranking:", error);
     res.status(500).json({ error: "Erro ao gerar ranking" });
+  }
+});
+
+// Buscar feedback por ID (deve vir após as rotas específicas)
+router.get("/:id", authenticate, async (req, res) => {
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "ID inválido" });
+  }
+
+  try {
+    let feedback = await Feedback.findById(id)
+      .populate("targetId")
+      .populate("author.userID", "name email");
+
+    if (!feedback) {
+      return res.status(404).json({ error: "Feedback não encontrado" });
+    }
+
+    feedback = feedback.toObject();
+    if (feedback.author.isAnonymous) {
+      delete feedback.author.userID;
+    }
+
+    res.json(feedback);
+  } catch (error) {
+    console.error("Erro ao buscar feedback:", error);
+    res.status(500).json({ error: "Erro ao buscar feedback" });
+  }
+});
+
+// Criar feedback
+router.post(
+  "/",
+  authenticate,
+  [
+    check("targetType")
+      .isIn(["professor", "disciplina", "infraestrutura"])
+      .withMessage(
+        "TargetType deve ser: professor, disciplina ou infraestrutura"
+      ),
+    check("targetId")
+      .isMongoId()
+      .withMessage("TargetId deve ser um ObjectId válido"),
+    check("comment")
+      .notEmpty()
+      .withMessage("Comentário é obrigatório")
+      .isLength({ max: 500 })
+      .withMessage("Comentário deve ter no máximo 500 caracteres"),
+    check("metadata.semester")
+      .matches(/^\d{4}\.[12]$/)
+      .withMessage("Semestre deve estar no formato YYYY.N (ex: 2025.1)"),
+    check("metadata.academicYear")
+      .isInt({ min: 2015, max: new Date().getFullYear() + 1 })
+      .withMessage("Ano acadêmico inválido"),
+  ],
+  async (req, res) => {
+    const errors = validationResult(req);
+    if (!errors.isEmpty()) {
+      return res.status(400).json({
+        error: "Dados inválidos",
+        details: errors.array(),
+      });
+    }
+
+    try {
+      const feedback = new Feedback({
+        ...req.body,
+        author: {
+          userID: req.user._id,
+          isAnonymous: req.body.isAnonymous || false,
+        },
+      });
+
+      await feedback.save();
+      await feedback.populate("targetId");
+
+      res.status(201).json({
+        message: "Feedback criado com sucesso",
+        feedback,
+      });
+    } catch (error) {
+      console.error("Erro ao criar feedback:", error);
+      res.status(500).json({ error: "Erro ao criar feedback" });
+    }
+  }
+);
+
+// Deletar feedback
+router.delete("/:id", authenticate, async (req, res) => {
+  const { id } = req.params;
+
+  if (!mongoose.Types.ObjectId.isValid(id)) {
+    return res.status(400).json({ error: "ID inválido" });
+  }
+
+  try {
+    const feedback = await Feedback.findById(id);
+    if (!feedback) {
+      return res.status(404).json({ error: "Feedback não encontrado" });
+    }
+
+    const isAuthor =
+      feedback.author.userID.toString() === req.user._id.toString();
+    const isAdmin = req.user.role === "admin";
+
+    if (!isAuthor && !isAdmin) {
+      return res.status(403).json({
+        error: "Sem permissão para deletar este feedback",
+      });
+    }
+
+    await Feedback.findByIdAndDelete(id);
+    res.json({ message: "Feedback excluído com sucesso" });
+  } catch (error) {
+    console.error("Erro ao excluir feedback:", error);
+    res.status(500).json({ error: "Erro ao excluir feedback" });
   }
 });
 

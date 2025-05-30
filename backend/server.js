@@ -42,7 +42,7 @@ app.use(globalLimiter);
 app.use(express.json({ limit: "10mb" }));
 app.use(express.urlencoded({ extended: true }));
 
-// Development logging middleware (moved to before routes)
+// Development logging middleware
 if (process.env.NODE_ENV === "development") {
   app.use((req, res, next) => {
     console.log(`${new Date().toISOString()} - ${req.method} ${req.path}`);

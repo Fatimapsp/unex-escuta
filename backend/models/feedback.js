@@ -97,8 +97,6 @@ const feedbackSchema = new Schema({
   },
 });
 
-// Remover o pre('save'), pois não é mais necessário!
-
 // Método para estatísticas
 feedbackSchema.statics.getStatsByTarget = function (targetType, targetId) {
   return this.aggregate([
